@@ -5,4 +5,5 @@ sentence-transformers
 scikit-learn
 streamlit
 torch
+torchvision
 pyarrow
