@@ -32,6 +32,10 @@ class QuestMatcher:
       np.save(save_path, self.embeddings)
 
   def search(self, query: str, top_k: int = 5):
+    if self.embeddings is None:
+      raise ValueError(
+        "Embeddings not loaded! Call load_saved_embeddings() before searching."
+      )
     query_vector = self.model.encode([query])
     similarities = cosine_similarity(query_vector, self.embeddings)[0]
 

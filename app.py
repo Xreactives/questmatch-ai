@@ -1,7 +1,12 @@
 import os
+import urllib.request
 import numpy as np
 import streamlit as st
 from src.search_engine import QuestMatcher
+
+# Direct raw download URL from your Hugging Face dataset
+HF_EMBEDDINGS_URL = "https://huggingface.co/datasets/Yreactives/questmatch-embeddings/resolve/main/embeddings.npy"
+LOCAL_EMBEDDINGS_PATH = "data/embeddings.npy"
 
 st.set_page_config(
     page_title="QuestMatch AI", page_icon="🎮", layout="wide"
@@ -14,16 +19,15 @@ st.subheader("Semantic Game Recommendation Engine")
 @st.cache_resource
 def init_engine():
   matcher = QuestMatcher()
-
-  # Load parquet instead of the heavy CSVs
   matcher.initialize_data("data/games_clean.parquet")
 
-  embedding_path = "data/embeddings.npy"
-  if os.path.exists(embedding_path):
-    matcher.load_saved_embeddings(embedding_path)
-  else:
-    matcher.build_embeddings(save_path=embedding_path)
+  # Download pre-computed embeddings if not present locally
+  os.makedirs("data", exist_ok=True)
+  if not os.path.exists(LOCAL_EMBEDDINGS_PATH):
+    with st.spinner("Fetching vector space from Hugging Face..."):
+      urllib.request.urlretrieve(HF_EMBEDDINGS_URL, LOCAL_EMBEDDINGS_PATH)
 
+  matcher.load_saved_embeddings(LOCAL_EMBEDDINGS_PATH)
   return matcher
 
 
@@ -31,10 +35,6 @@ engine = init_engine()
 
 if "submitted_query" not in st.session_state:
   st.session_state.submitted_query = ""
-
-# Determine realistic upper bound using 95th percentile (defaults to $60 if array is small)
-raw_95th = np.percentile(engine.df["price"], 95)
-cap_price = int(raw_95th) if raw_95th > 0 else 100
 
 # --- Sidebar Controls ---
 st.sidebar.header("Filter Options")
@@ -47,7 +47,7 @@ if any_price:
   max_price = float("inf")
 else:
   max_price = st.sidebar.slider(
-      "Max Price ($)", min_value=0, max_value=100, value=100, step=5
+      "Max Price ($)", min_value=0, max_value=100, value=60, step=5
   )
 
 # --- Search Input ---
@@ -65,9 +65,9 @@ if st.session_state.submitted_query:
     results = engine.search(
         st.session_state.submitted_query, top_k=top_k * 5
     )
-    filtered_results = [r for r in results if r.get("price", 0) <= max_price][
-        :top_k
-    ]
+    filtered_results = [
+        r for r in results if float(r.get("price", 0)) <= max_price
+    ][:top_k]
 
     st.markdown(
         f'Showing top results for: *"{st.session_state.submitted_query}"*'
@@ -82,15 +82,14 @@ if st.session_state.submitted_query:
 
         with col1:
           st.markdown(f"### {game['name']}")
-          st.write(f"**Genres:** {game['genres']}")
-          st.write(f"**Developer:** {game['developers']}")
+          st.write(f"**Genres:** {game.get('genres', 'N/A')}")
+          st.write(f"**Developer:** {game.get('developers', 'N/A')}")
 
         with col2:
-          st.metric(
-              label="Match Score", value=f"{game['similarity_score']}%"
-          )
-          st.write(
-              f"**Price:** ${game['price']}"
-              if game["price"] > 0
-              else "**Free to Play**"
-          )
+          score = int(round(float(game.get("similarity_score", 0))))
+          st.metric(label="Match Score", value=f"{score}%")
+          price_val = float(game.get("price", 0))
+          if price_val > 0:
+            st.write(f"**Price:** ${int(round(price_val))}")
+          else:
+            st.write("**Free to Play**")
